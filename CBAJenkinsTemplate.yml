@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Provisioning of 2 EC2 Instances within a Custom Network via CloudFormation
+Description: Provisioning of EC2 Instance within a Custom Network via CloudFormation
 
 Resources:
   VPC:
