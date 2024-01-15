@@ -1,0 +1,178 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Provisioning of two EC2 instances with Ansible installed on the main instance
+
+Parameters:
+  InstanceTypeParameter:
+    Type: String
+    Default: t2.medium
+    Description: Instance size
+
+  SystemName:
+    Description: Prefix for all the resources created
+    Type: String
+    Default: Demo
+
+  Keypair:
+    Type: String
+    Default: demokey
+    Description: The name of the keypair available.
+    
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-vpc
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-IGW
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: eu-west-2a
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-publicsubnet
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-RouteTable
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for EC2 Instances
+      GroupName: Main-SG
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-SG
+      VpcId: !Ref VPC
+
+  MainInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: gp3
+            Iops: 3000
+            DeleteOnTermination: true
+            VolumeSize: 16
+      ImageId: "ami-0eb260c4d5475b901"
+      InstanceType: !Ref InstanceTypeParameter
+      KeyName: !Ref Keypair
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref InstanceSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-instance
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+
+          # Update packages and install necessary packages
+          apt-get update -y
+          apt-get install -y python3.8
+          apt-get install -y python3-pip
+          apt-get install -y software-properties-common
+          apt-add-repository --yes --update ppa:ansible/ansible
+          apt-get install -y ansible
+
+          # Install boto3 and Git
+          pip3 install boto3
+          apt-get install -y git
+
+          # Install AWS CLI
+          apt-get install -y unzip
+          curl "https://d1vvhvl2y92vvt.cloudfront.net/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          ./aws/install --update
+
+          # Create Ansible Directory
+          mkdir -p /etc/ansible
+          mkdir -p /opt/ubuntu/ansible/inventory
+
+          # Create the Ansible.cfg file with Dynamic Inventory Configurations
+          cat > /etc/ansible/ansible.cfg << EOL
+          [inventory]
+          enable_plugins = aws_ec2
+          [defaults]
+          inventory = /opt/ubuntu/ansible/inventory/aws_ec2.yaml
+          remote_user = ubuntu
+          private_key_file = /home/ubuntu/.ssh/ssh_key.pem
+          EOL
+          # Create the /opt/ubuntu/ansible/inventory/aws_ec2.yaml file
+          cat > /opt/ubuntu/ansible/inventory/aws_ec2.yaml << EOL
+          ---
+          plugin: aws_ec2
+          regions:
+            - eu-west-2
+
+  SecondInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: gp3
+            Iops: 3000
+            DeleteOnTermination: true
+            VolumeSize: 16
+      ImageId: "ami-0eb260c4d5475b901"
+      InstanceType: !Ref InstanceTypeParameter
+      KeyName: !Ref Keypair
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref InstanceSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-b
